@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle Financeiro Pessoal — Dark Mode</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --text: #e2e8f0;
+    --subtext: #94a3b8;
+    --accent: #6366f1;
+    --border: #334155;
+    --danger: #ef4444;
+    --success: #10b981;
+  }
+
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 20px;
+  }
+  h1, h2, h3 { color: var(--text); margin-top: 0; }
+  p { color: var(--subtext); }
+
+  .container { max-width: 1200px; margin: auto; }
+
+  .card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+  }
+
+  .grid { display: grid; gap: 20px; }
+  .grid-3 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+
+  input, select, button {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    width: 100%;
+    background: #0f172a;
+    color: var(--text);
+  }
+
+  input:focus, select:focus {
+    border-color: var(--accent);
+    outline: none;
+  }
+
+  button {
+    background-color: var(--accent);
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  button:hover { background-color: #4f46e5; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--subtext); font-size: 13px; }
+  td button { color: var(--danger); background: none; border: none; cursor: pointer; }
+
+  .totals div { margin-right: 20px; }
+  .positive { color: var(--success); font-weight: bold; }
+  .negative { color: var(--danger); font-weight: bold; }
+
+  .chart-container { background: var(--card); border-radius: 16px; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Controle Financeiro Pessoal</h1>
+  <p>Painel interativo — dados salvos no navegador.</p>
+
+  <div class="grid grid-3">
+    <div class="card">
+      <h2>Entradas</h2>
+      <label>Salário Mensal</label>
+      <input type="number" id="salary" placeholder="0.00">
+      <label>Outras Receitas</label>
+      <input type="number" id="otherIncome" placeholder="0.00">
+      <div class="totals" style="display:flex; flex-wrap:wrap; margin-top:10px;">
+        <div><small>Total Entradas</small><div id="totalIncome">R$ 0,00</div></div>
+        <div><small>Total Despesas</small><div id="totalExpenses">R$ 0,00</div></div>
+        <div><small>Saldo</small><div id="balance" class="positive">R$ 0,00</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Adicionar Despesa</h2>
+      <label>Categoria</label>
+      <select id="category"></select>
+      <label>Descrição</label>
+      <input id="description">
+      <label>Valor</label>
+      <input type="number" id="value" step="0.01" placeholder="0.00">
+      <label>Data</label>
+      <input type="date" id="date">
+      <div style="margin-top:10px; display:flex; gap:10px;">
+        <button id="addBtn">➕ Adicionar</button>
+        <button id="clearBtn" style="background:#334155;">🧹 Limpar tudo</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Visão Geral</h2>
+      <canvas id="pieChart" height="200"></canvas>
+      <canvas id="lineChart" height="150" style="margin-top:15px;"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Lista de Despesas</h3>
+    <div style="margin-bottom:10px;">
+      <label>Filtrar mês: </label>
+      <select id="monthFilter">
+        <option value="all">Todos</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Valor (R$)</th><th></th></tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const DEFAULT_CATEGORIES = ['Moradia','Alimentação','Transporte','Assinaturas','Lazer','Outros'];
+const COLORS = ['#6366f1','#06b6d4','#f97316','#10b981','#ef4444','#a78bfa'];
+
+const categorySelect = document.getElementById('category');
+DEFAULT_CATEGORIES.forEach(c => {
+  const opt = document.createElement('option');
+  opt.value = c; opt.textContent = c;
+  categorySelect.appendChild(opt);
+});
+
+let salary = localStorage.salary || '';
+let otherIncome = localStorage.otherIncome || '';
+let entries = JSON.parse(localStorage.entries || '[]');
+
+document.getElementById('salary').value = salary;
+document.getElementById('otherIncome').value = otherIncome;
+
+function saveData() {
+  localStorage.salary = salary;
+  localStorage.otherIncome = otherIncome;
+  localStorage.entries = JSON.stringify(entries);
+  render();
+}
+
+function addEntry() {
+  const category = document.getElementById('category').value;
+  const description = document.getElementById('description').value;
+  const value = parseFloat(document.getElementById('value').value);
+  const date = document.getElementById('date').value || new Date().toISOString().slice(0,10);
+  if (!value || !category) return;
+  entries.unshift({ id: Date.now(), category, description, value, date });
+  document.getElementById('description').value = '';
+  document.getElementById('value').value = '';
+  saveData();
+}
+
+function removeEntry(id) {
+  entries = entries.filter(e => e.id !== id);
+  saveData();
+}
+
+function render() {
+  salary = document.getElementById('salary').value;
+  otherIncome = document.getElementById('otherIncome').value;
+  const totalIncome = Number(salary||0) + Number(otherIncome||0);
+  const totalExpenses = entries.reduce((s,e)=>s+Number(e.value),0);
+  const balance = totalIncome - totalExpenses;
+  document.getElementById('totalIncome').textContent = 'R$ '+totalIncome.toFixed(2);
+  document.getElementById('totalExpenses').textContent = 'R$ '+totalExpenses.toFixed(2);
+  const balanceEl = document.getElementById('balance');
+  balanceEl.textContent = 'R$ '+balance.toFixed(2);
+  balanceEl.className = balance < 0 ? 'negative' : 'positive';
+
+  const monthFilter = document.getElementById('monthFilter').value;
+  const filtered = monthFilter==='all'?entries:entries.filter(e=>e.date.startsWith(monthFilter));
+
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  filtered.forEach(e=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${e.date}</td>
+      <td>${e.category}</td>
+      <td>${e.description}</td>
+      <td>R$ ${Number(e.value).toFixed(2)}</td>
+      <td><button onclick="removeEntry(${e.id})">Remover</button></td>`;
+    tbody.appendChild(tr);
+  });
+
+  const months = [...new Set(entries.map(e=>e.date.slice(0,7)))].sort();
+  const select = document.getElementById('monthFilter');
+  select.innerHTML = '<option value="all">Todos</option>';
+  months.forEach(m=>{
+    const opt = document.createElement('option');
+    opt.value = m; opt.textContent = m;
+    select.appendChild(opt);
+  });
+
+  updateCharts();
+}
+
+let pieChart, lineChart;
+function updateCharts() {
+  const byCategory = DEFAULT_CATEGORIES.map(cat => ({
+    name: cat,
+    value: entries.filter(e=>e.category===cat).reduce((s,x)=>s+Number(x.value),0)
+  })).filter(c=>c.value>0);
+
+  const historyMap = {};
+  entries.forEach(e=>{
+    const m = e.date.slice(0,7);
+    historyMap[m] = (historyMap[m]||0)+Number(e.value);
+  });
+  const history = Object.keys(historyMap).sort().map(m=>({month:m,expenses:historyMap[m]}));
+
+  const ctx1 = document.getElementById('pieChart').getContext('2d');
+  const ctx2 = document.getElementById('lineChart').getContext('2d');
+  if (pieChart) pieChart.destroy();
+  if (lineChart) lineChart.destroy();
+
+  pieChart = new Chart(ctx1, {
+    type: 'pie',
+    data: {
+      labels: byCategory.map(c=>c.name),
+      datasets: [{ data: byCategory.map(c=>c.value), backgroundColor: COLORS }]
+    },
+    options: { plugins: { legend: { labels: { color: '#e2e8f0' } } } }
+  });
+
+  lineChart = new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels: history.map(h=>h.month),
+      datasets: [{ label:'Despesas', data: history.map(h=>h.expenses), borderColor:'#6366f1', fill:false }]
+    },
+    options: { 
+      scales:{
+        x:{ ticks:{color:'#e2e8f0'} },
+        y:{ ticks:{color:'#e2e8f0'}, beginAtZero:true }
+      },
+      plugins:{ legend:{ labels:{ color:'#e2e8f0' } } }
+    }
+  });
+}
+
+document.getElementById('addBtn').addEventListener('click', e => { e.preventDefault(); addEntry(); });
+document.getElementById('clearBtn').addEventListener('click', ()=>{ entries=[]; saveData(); });
+document.getElementById('salary').addEventListener('input', saveData);
+document.getElementById('otherIncome').addEventListener('input', saveData);
+document.getElementById('monthFilter').addEventListener('change', render);
+
+render();
+</script>
+</body>
+</html>
