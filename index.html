@@ -41,7 +41,7 @@
   .grid { display: grid; gap: 20px; }
   .grid-3 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 
-  input, select, button {
+  input, button {
     padding: 8px;
     border-radius: 6px;
     border: 1px solid var(--border);
@@ -50,7 +50,7 @@
     color: var(--text);
   }
 
-  input:focus, select:focus {
+  input:focus {
     border-color: var(--accent);
     outline: none;
   }
@@ -98,8 +98,8 @@
 
     <div class="card">
       <h2>Adicionar Despesa</h2>
-      <label>Categoria</label>
-      <select id="category"></select>
+      <label>Categoria (digite qualquer nome)</label>
+      <input id="category" placeholder="Ex: Compras, Internet, Academia...">
       <label>Descrição</label>
       <input id="description">
       <label>Valor</label>
@@ -139,39 +139,56 @@
 </div>
 
 <script>
-const DEFAULT_CATEGORIES = ['Moradia','Alimentação','Transporte','Assinaturas','Lazer','Outros'];
-const COLORS = ['#6366f1','#06b6d4','#f97316','#10b981','#ef4444','#a78bfa'];
-
-const categorySelect = document.getElementById('category');
-DEFAULT_CATEGORIES.forEach(c => {
-  const opt = document.createElement('option');
-  opt.value = c; opt.textContent = c;
-  categorySelect.appendChild(opt);
-});
-
+// Recupera dados do localStorage
 let salary = localStorage.salary || '';
 let otherIncome = localStorage.otherIncome || '';
 let entries = JSON.parse(localStorage.entries || '[]');
+let categories = JSON.parse(localStorage.categories || '[]');
+let categoryColors = JSON.parse(localStorage.categoryColors || '{}');
 
 document.getElementById('salary').value = salary;
 document.getElementById('otherIncome').value = otherIncome;
+
+// Função para gerar cores únicas
+function generateColor(seed) {
+  const hue = (seed * 137.508) % 360; // ângulo dourado
+  return `hsl(${hue}, 70%, 60%)`;
+}
+
+function assignCategoryColor(category) {
+  if (!categoryColors[category]) {
+    const seed = Object.keys(categoryColors).length + 1;
+    categoryColors[category] = generateColor(seed);
+    localStorage.categoryColors = JSON.stringify(categoryColors);
+  }
+  return categoryColors[category];
+}
 
 function saveData() {
   localStorage.salary = salary;
   localStorage.otherIncome = otherIncome;
   localStorage.entries = JSON.stringify(entries);
+  localStorage.categories = JSON.stringify(categories);
+  localStorage.categoryColors = JSON.stringify(categoryColors);
   render();
 }
 
 function addEntry() {
-  const category = document.getElementById('category').value;
+  const category = document.getElementById('category').value.trim();
   const description = document.getElementById('description').value;
   const value = parseFloat(document.getElementById('value').value);
   const date = document.getElementById('date').value || new Date().toISOString().slice(0,10);
   if (!value || !category) return;
+
+  if (!categories.includes(category)) {
+    categories.push(category);
+    assignCategoryColor(category);
+  }
+
   entries.unshift({ id: Date.now(), category, description, value, date });
   document.getElementById('description').value = '';
   document.getElementById('value').value = '';
+  document.getElementById('category').value = '';
   saveData();
 }
 
@@ -222,7 +239,7 @@ function render() {
 
 let pieChart, lineChart;
 function updateCharts() {
-  const byCategory = DEFAULT_CATEGORIES.map(cat => ({
+  const byCategory = categories.map(cat => ({
     name: cat,
     value: entries.filter(e=>e.category===cat).reduce((s,x)=>s+Number(x.value),0)
   })).filter(c=>c.value>0);
@@ -239,11 +256,13 @@ function updateCharts() {
   if (pieChart) pieChart.destroy();
   if (lineChart) lineChart.destroy();
 
+  const colors = byCategory.map(c => assignCategoryColor(c.name));
+
   pieChart = new Chart(ctx1, {
     type: 'pie',
     data: {
       labels: byCategory.map(c=>c.name),
-      datasets: [{ data: byCategory.map(c=>c.value), backgroundColor: COLORS }]
+      datasets: [{ data: byCategory.map(c=>c.value), backgroundColor: colors }]
     },
     options: { plugins: { legend: { labels: { color: '#e2e8f0' } } } }
   });
@@ -265,7 +284,7 @@ function updateCharts() {
 }
 
 document.getElementById('addBtn').addEventListener('click', e => { e.preventDefault(); addEntry(); });
-document.getElementById('clearBtn').addEventListener('click', ()=>{ entries=[]; saveData(); });
+document.getElementById('clearBtn').addEventListener('click', ()=>{ entries=[]; categories=[]; categoryColors={}; saveData(); });
 document.getElementById('salary').addEventListener('input', saveData);
 document.getElementById('otherIncome').addEventListener('input', saveData);
 document.getElementById('monthFilter').addEventListener('change', render);
